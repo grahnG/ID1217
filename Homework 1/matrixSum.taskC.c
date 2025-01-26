@@ -119,7 +119,7 @@ void *Worker(void *arg) {
 
     while (1) {
         /* Critical section: Get a row from the shared counter */
-        phtread_mutex_lock(&rowLock);
+        pthread_mutex_lock(&rowLock);
         row = nextRow;
         nextRow++;
         pthread_mutex_unlock(&rowLock);
@@ -128,17 +128,15 @@ void *Worker(void *arg) {
         if (row >= size) {
             break;
         }
-    }
 
-    /* Process assigned strip */
-    for (int i = firstRow; i <= lastRow; i++) {
+        /* Process the assigned row */
         for (int j = 0; j < size; j++) {
-            result->localSum += matrix[i][j];
-            if (matrix[i][j] > result->localMax.value) {
-                result->localMax = (MatrixElement){ .row = i, .col = j, .value = matrix[i][j] };
+            result->localSum += matrix[row][j];
+            if (matrix[row][j] > result->localMax.value) {
+                result->localMax = (MatrixElement){ .row = row, .col = j, .value = matrix[row][j] };
             }
-            if (matrix[i][j] < result->localMin.value) {
-                result->localMin = (MatrixElement){ .row = i, .col = j, .value = matrix[i][j] };
+            if (matrix[row][j] < result->localMin.value) {
+                result->localMin = (MatrixElement){ .row = row, .col = j, .value = matrix[row][j] };
             }
         }
     }
