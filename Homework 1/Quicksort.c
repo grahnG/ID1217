@@ -68,6 +68,8 @@ int size;
 int activeQueue;
   int *parallelArr;
   int *serialArr;
+pthread_t workers[MAXWORKERS];
+volatile bool work_done = false;
 
 typedef struct{
   int left, right;
@@ -185,12 +187,24 @@ printf("Original Unsorted Array: \n");
 
   initQueue(&taskQueue);
 
+
   /* do the parallel work: create the workers */
   start_time = read_timer();
   /* create an inital task, which is to partition the whole array*/
-  enqueue(&taskQueue, (Task){0, size-1});
-  for (l = 0; l < numWorkers; l++)
+  for (l = 0; l < numWorkers; l++){
     pthread_create(&workerid[l], &attr, Worker, (void *) l);
+}
+    enqueue(&taskQueue, (Task){0, size-1});
+
+  while(1){
+    pthread_mutex_lock(&taskQueue.lock);
+    if(taskQueue.count == 0){
+      work_done = true;
+      pthread_mutex_unlock(&taskQueue.lock);
+      break;
+    }
+    pthread_mutex_unlock(&taskQueue.lock);
+  }
   
   for( l = 0; l<numWorkers; l++){
     pthread_join(workerid[l],NULL);
@@ -230,21 +244,17 @@ double final_timeParallel = end_time - start_time;
 void *Worker(void *arg) {
   while (1) {
     Task task;
-    /* if the taskQueue is empty exit the while loop */
-    if(!dequeue(&taskQueue, &task)){
-      break;
-    }
-
-    /* partition the array into smaller arrays, putting it on the left or right side of the pivot depending on the number*/
-    int pivot= partition(task.left, task.right, parallelArr);
+    /* try to get a task from the queue */
+    if(dequeue(&taskQueue, &task)){
+      int pivot = partition(task.left, task.right, parallelArr);
     
-    if(task.left < pivot -1){
-      enqueue(&taskQueue, (Task) {task.left, pivot -1});
+        if (task.left < pivot - 1) enqueue(&taskQueue, (Task){task.left, pivot - 1});
+        if (pivot + 1 < task.right) enqueue(&taskQueue, (Task){pivot + 1, task.right});
+    } else {
+      if(work_done) break;
+      //Barrier();
+    }
 
-    }
-    if(pivot+1 < task.right){
-      enqueue(&taskQueue, (Task){pivot + 1, task.right});
-    }
 
   }
   return NULL;
@@ -292,3 +302,4 @@ void swap(int* a, int* b ){
   *a = *b;
   *b = t ;
 }
+
