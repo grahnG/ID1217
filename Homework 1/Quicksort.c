@@ -197,13 +197,10 @@ printf("Original Unsorted Array: \n");
     enqueue(&taskQueue, (Task){0, size-1});
 
   while(1){
-    pthread_mutex_lock(&taskQueue.lock);
     if(taskQueue.count == 0){
       work_done = true;
-      pthread_mutex_unlock(&taskQueue.lock);
       break;
     }
-    pthread_mutex_unlock(&taskQueue.lock);
   }
   
   for( l = 0; l<numWorkers; l++){
@@ -216,24 +213,7 @@ double final_timeParallel = end_time - start_time;
 
 /*final printout of the sorted arrays*/
   printf("The Array sorter in a serial fashion time in seconds: %lf\n", final_timeSerial );
-  /*("\n [");
-  for(i = 0; i <size; i++){
-      if(i!= size-1){
-      printf("%d, ",serialArr[i]);
-    }else { printf("%d", serialArr[i]);
-    }
-  }
-    printf("]\n");*/
-
   printf( "The array sorted in a parallel fashion, time in seconds: %lf\n", final_timeParallel);
-      /*printf("\n [");
-  for(i = 0; i <size; i++){
-      if(i!= size-1){
-      printf("%d, ",parallelArr[i]);
-    }else { printf("%d", parallelArr[i]);
-    }
-  }
-    printf("]\n");*/
 
   
   free(serialArr);
@@ -245,7 +225,7 @@ void *Worker(void *arg) {
   while (1) {
     Task task;
     /* try to get a task from the queue */
-    if(dequeue(&taskQueue, &task)){
+    if(dequeue(&taskQueue, &task) && (task.right-task.left) <= 100){
       int pivot = partition(task.left, task.right, parallelArr);
     
         if (task.left < pivot - 1) enqueue(&taskQueue, (Task){task.left, pivot - 1});
