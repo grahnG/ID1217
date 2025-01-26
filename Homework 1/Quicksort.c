@@ -21,6 +21,7 @@
 #include <sys/time.h>
 #define MAXSIZE 10000  /* maximum matrix size */
 #define MAXWORKERS 10   /* maximum number of workers */
+#define MAX_QUEUE_SIZE 10000
 
 
 pthread_mutex_t barrier;  /* mutex lock for the barrier */
@@ -67,6 +68,14 @@ int size;
 int activeQueue;
   int *parallelArr;
   int *serialArr;
+typedef struct{
+  int left, right;
+} Task;
+typedef struct{ 
+  Task tasks[MAX_QUEUE_SIZE];
+  int front, rear, count
+  pthread_mutex_T
+}
 
 void *Worker(void *);
 
