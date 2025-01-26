@@ -68,13 +68,52 @@ int size;
 int activeQueue;
   int *parallelArr;
   int *serialArr;
+
 typedef struct{
   int left, right;
 } Task;
+
 typedef struct{ 
   Task tasks[MAX_QUEUE_SIZE];
-  int front, rear, count
-  pthread_mutex_T
+  int front, rear, count;
+  pthread_mutex_t lock;
+} TaskQueue;
+
+TaskQueue taskQueue;
+
+/* initialize queue we just created*/
+
+void initQueue(TaskQueue *q){
+  q->front = 0;
+  q->rear = 0;
+  q->count = 0;
+  pthread_mutex_init(&q->lock, NULL);
+}
+
+/* function to queue tasks*/
+void enqueue(TaskQueue *q, Task task){
+  pthread_mutex_lock(&q->lock);
+  if(q->count < MAX_QUEUE_SIZE){
+    q->tasks[q->rear] = task;
+    q->rear = (q->rear+1) % MAX_QUEUE_SIZE;
+    q->count++;
+  }
+  pthread_mutex_unlock(&q->lock);
+
+}
+
+/* function to remove from queue*/
+int dequeue(TaskQueue *q, Task *task){
+  pthread_mutex_lock(&q->lock);
+  if(q->count == 0) {
+    pthread_mutex_unlock (&q->lock);
+    return 0;
+  }
+  *task = q->tasks[q->front];
+  q->front = (q->front + 1 ) % MAX_QUEUE_SIZE;
+  q->count--;
+  pthread_mutex_unlock(&q->lock);
+  return 1;
 }
 
 void *Worker(void *);
@@ -128,6 +167,7 @@ int main(int argc, char *argv[]) {
   }
 
 /* printing the randomized array*/
+printf("Original Unsorted Array: \n");
   printf("[");
   for(i = 0; i <size; i++){
       if(i!= size-1){
@@ -137,14 +177,18 @@ int main(int argc, char *argv[]) {
   }
     printf("]\n");
 
-
+  double end_timeSerial, start_timeSerial;
+   start_timeSerial = read_timer();
   serialQuicksort(0, size-1, serialArr);
+  end_timeSerial = read_timer();
+  double final_timeSerial = end_timeSerial-start_timeSerial;
 
- activeQueue = 0;
-
+  initQueue(&taskQueue);
 
   /* do the parallel work: create the workers */
   start_time = read_timer();
+  /* create an inital task, which is to partition the whole array*/
+  enqueue(&taskQueue, (Task){0, size-1});
   for (l = 0; l < numWorkers; l++)
     pthread_create(&workerid[l], &attr, Worker, (void *) l);
   
@@ -153,46 +197,57 @@ int main(int argc, char *argv[]) {
   }
     end_time = read_timer();
 
+double final_timeParallel = end_time - start_time;
 
 
 /*final printout of the sorted arrays*/
-  printf("[");
+  printf("The Array sorter in a serial fashion time in seconds: %lf\n", final_timeSerial );
+  /*("\n [");
   for(i = 0; i <size; i++){
       if(i!= size-1){
       printf("%d, ",serialArr[i]);
     }else { printf("%d", serialArr[i]);
     }
   }
-    printf("]\n");
+    printf("]\n");*/
 
-      printf("[");
+  printf( "The array sorted in a parallel fashion, time in seconds: %lf\n", final_timeParallel);
+      /*printf("\n [");
   for(i = 0; i <size; i++){
       if(i!= size-1){
       printf("%d, ",parallelArr[i]);
     }else { printf("%d", parallelArr[i]);
     }
   }
-    printf("]\n");
+    printf("]\n");*/
+
+  
   free(serialArr);
   free(parallelArr);
 }
 
-/* Each worker sums the values in one strip of the matrix.
-   After a barrier, worker(0) computes and prints the total */
+/* Each worker picks up  */
 void *Worker(void *arg) {
-  long id = (long)arg;
-  if(id == 0) {
-    serialQuicksort(0, size-1, parallelArr);
-    activeQueue++;
-  }
-    
-    
-    
-    
-    /* get end time */
-    
+  while (1) {
+    Task task;
+    /* if the taskQueue is empty exit the while loop */
+    if(!dequeue(&taskQueue, &task)){
+      break;
+    }
 
-  
+    /* partition the array into smaller arrays, putting it on the left or right side of the pivot depending on the number*/
+    int pivot= partition(task.left, task.right, parallelArr);
+    
+    if(task.left < pivot -1){
+      enqueue(&taskQueue, (Task) {task.left, pivot -1});
+
+    }
+    if(pivot+1 < task.right){
+      enqueue(&taskQueue, (Task){pivot + 1, task.right});
+    }
+
+  }
+  return NULL;
 }
  
 void serialQuicksort(int start, int end,int arr[]){
