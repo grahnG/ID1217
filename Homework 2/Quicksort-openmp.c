@@ -138,7 +138,7 @@ void parallelQuicksort(int start, int end, int* arr) {
     if (start < end) {
       int pivot = partition( start, end, arr); // Dela upp arrayen
 
-      if((end-start) > 10000000){ // Skapa uppgifter för att sortera vänster och höger del parallellt
+      if((end-start) > 100000){ // Skapa uppgifter för att sortera vänster och höger del parallellt
         #pragma omp task
         parallelQuicksort(start, pivot - 1, arr);  // Sortera vänster del
 
