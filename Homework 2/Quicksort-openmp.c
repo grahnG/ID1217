@@ -30,6 +30,7 @@ int partition(int start, int end, int arr[]);
 void swap(int* a, int* b);
 void parallelQuicksort(int start, int end, int arr[]);
 void insertSort(int arr[], int n);
+int medianOfThree( int start, int end,int* arr);
 
 /* read command line, initialize, and create threads */
 int main(int argc, char *argv[]) {
@@ -107,11 +108,8 @@ void serialQuicksort(int start, int end,int arr[]){
 /* partitions the array i.e splits the array into lower and higher values arround the pivot*/
 int partition(int start, int end, int arr[]){
   //lägg till median of three för optimerad metod
-  int mid = start + (end - start) / 2;
-  
-  /* Flytta pivot till slutet */
-  int pivotIndex = mid;
-  swap(&arr[pivotIndex], &arr[end]);
+  int  median= medianOfThree(start, end, arr);
+  swap(&arr[median], &arr[end]);
   int pivot = arr[end];
 
   int i = start - 1;
@@ -169,4 +167,15 @@ void insertSort(int arr[], int n)
         }
         arr[j + 1] = key;
     }
+}
+int medianOfThree( int start, int end,int* arr) {
+    int mid = start + (end - start) / 2;
+
+      
+    int a = arr[start], b = arr[mid], c = arr[end];
+
+    /* checks what part is the median*/
+    if ((a < b && b < c) || (c < b && b < a)) return mid;  
+    if ((b < a && a < c) || (c < a && a < b)) return start;
+    return end; 
 }
