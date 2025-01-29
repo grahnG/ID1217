@@ -180,16 +180,15 @@ printf("Original Unsorted Array: \n");
     printf("]\n");
 
   double end_timeSerial, start_timeSerial;
-   start_timeSerial = read_timer();
+   start_timeSerial = clock();
   serialQuicksort(0, size-1, serialArr);
-  end_timeSerial = read_timer();
-  double final_timeSerial = end_timeSerial-start_timeSerial;
+  double final_timeSerial = (double)(clock() - start_timeSerial) / CLOCKS_PER_SEC;
 
   initQueue(&taskQueue);
 
 
   /* do the parallel work: create the workers */
-  start_time = read_timer();
+  start_time = clock();
   /* create an inital task, which is to partition the whole array*/
   for (l = 0; l < numWorkers; l++){
     pthread_create(&workerid[l], &attr, Worker, (void *) l);
@@ -206,9 +205,8 @@ printf("Original Unsorted Array: \n");
   for( l = 0; l<numWorkers; l++){
     pthread_join(workerid[l],NULL);
   }
-    end_time = read_timer();
+  double final_timeParallel = (double)(clock() - start_time) / CLOCKS_PER_SEC;
 
-double final_timeParallel = end_time - start_time;
 
 
 /*final printout of the sorted arrays*/
