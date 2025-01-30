@@ -6,6 +6,11 @@
 #define THRESHOLD 100000  // Switch to serial sorting for small partitions
 #define MAX_THREADS 8     // Max number of threads
 
+/* Global Variables */
+int activeThreads = 0;              // Counter for active threads
+pthread_mutex_t threadLock;         // Mutex for thread counter
+int numThreads;                     // User-specified thread limit
+
 /* Swap helper function */
 void swap(int *a, int *b) {
     int temp = *a;
@@ -55,6 +60,20 @@ typedef struct {
     int *array;
 } QuickSortTask;
 
+/* Function to create a thread if the limit is not exceeded */
+int createThreadIfPossible(pthread_t *thread, void *(*start_routine)(void *), void *arg) {
+    pthread_mutex_lock(&threadLock);
+    if (activeThreads >= numThreads) {
+        pthread_mutex_unlock(&threadLock);
+        return 0; // Thread limit reached, fall back to serial
+    }
+    activeThreads++;
+    pthread_mutex_unlock(&threadLock);
+
+    pthread_create(thread, NULL, start_routine, arg);
+    return 1; // Thread created successfully
+}
+
 /* Parallel Quicksort using Pthreads */
 void *parallelQuicksort(void *arg) {
     QuickSortTask *task = (QuickSortTask *)arg;
@@ -85,11 +104,27 @@ void *parallelQuicksort(void *arg) {
             rightTask->right = right;
             rightTask->array = array;
 
-            pthread_create(&leftThread, NULL, parallelQuicksort, leftTask);
-            pthread_create(&rightThread, NULL, parallelQuicksort, rightTask);
+            // Try to create threads for left and right partitions
+            int leftThreadCreated = createThreadIfPossible(&leftThread, parallelQuicksort, leftTask);
+            int rightThreadCreated = createThreadIfPossible(&rightThread, parallelQuicksort, rightTask);
 
-            pthread_join(leftThread, NULL);
-            pthread_join(rightThread, NULL);
+            if (leftThreadCreated) {
+                pthread_join(leftThread, NULL);
+                pthread_mutex_lock(&threadLock);
+                activeThreads--;
+                pthread_mutex_unlock(&threadLock);
+            } else {
+                serialQuicksort(left, pivotIndex - 1, array);
+            }
+
+            if (rightThreadCreated) {
+                pthread_join(rightThread, NULL);
+                pthread_mutex_lock(&threadLock);
+                activeThreads--;
+                pthread_mutex_unlock(&threadLock);
+            } else {
+                serialQuicksort(pivotIndex + 1, right, array);
+            }
         } else {
             serialQuicksort(left, pivotIndex - 1, array);
             serialQuicksort(pivotIndex + 1, right, array);
@@ -105,8 +140,11 @@ int main(int argc, char *argv[]) {
     }
 
     int arraySize = atoi(argv[1]);
-    int numThreads = atoi(argv[2]);
+    numThreads = atoi(argv[2]);
     if (numThreads > MAX_THREADS) numThreads = MAX_THREADS;
+
+    // Initialize mutex for thread counter
+    pthread_mutex_init(&threadLock, NULL);
 
     // Allocate and initialize the array
     int *array = (int *)malloc(sizeof(int) * arraySize);
@@ -137,6 +175,7 @@ int main(int argc, char *argv[]) {
     mainTask->left = 0;
     mainTask->right = arraySize - 1;
     mainTask->array = copy;
+
     pthread_create(&mainThread, NULL, parallelQuicksort, mainTask);
     pthread_join(mainThread, NULL);
     gettimeofday(&endParallel, NULL);
@@ -149,5 +188,6 @@ int main(int argc, char *argv[]) {
 
     free(array);
     free(copy);
+    pthread_mutex_destroy(&threadLock);
     return 0;
 }
