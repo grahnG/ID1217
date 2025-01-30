@@ -82,14 +82,19 @@ printf("Original Unsorted Array: \n");
 
 
   start_time = omp_get_wtime();
-  parallelQuicksort(0, size-1, parallelArr);
+#pragma omp parallel
+{
+    #pragma omp single nowait
+    parallelQuicksort(0, size - 1, parallelArr);
+}
     
 
   end_time = omp_get_wtime();
 
   printf("Serial Time: %g\n", serialTime);
   printf("Parallel time: %g\n", end_time - start_time);
-
+  free(serialArr);
+  free(parallelArr);
 }
 
 void serialQuicksort(int start, int end,int arr[]){
@@ -106,7 +111,7 @@ void serialQuicksort(int start, int end,int arr[]){
 
 /* serial partition function, low and high is indices */
 /* partitions the array i.e splits the array into lower and higher values arround the pivot*/
-int partition(int start, int end, int arr[]){
+int partition(int start, int end, int *arr){
   //lägg till median of three för optimerad metod
   int  median= medianOfThree(start, end, arr);
   swap(&arr[median], &arr[end]);
@@ -168,14 +173,10 @@ void insertSort(int arr[], int n)
         arr[j + 1] = key;
     }
 }
-int medianOfThree( int start, int end,int* arr) {
-    int mid = start + (end - start) / 2;
-
-      
-    int a = arr[start], b = arr[mid], c = arr[end];
-
-    /* checks what part is the median*/
-    if ((a < b && b < c) || (c < b && b < a)) return mid;  
-    if ((b < a && a < c) || (c < a && a < b)) return start;
-    return end; 
+int medianOfThree(int left, int right, int *array) {
+    int mid = left + (right - left) / 2;
+    if (array[left] > array[mid]) swap(&array[left], &array[mid]);
+    if (array[left] > array[right]) swap(&array[left], &array[right]);
+    if (array[mid] > array[right]) swap(&array[mid], &array[right]);
+    return mid;
 }
