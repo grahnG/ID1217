@@ -1,43 +1,23 @@
-/* matrix summation using pthreads
-
-   features: uses a barrier; the Worker[0] computes
-             the total sum from partial sums computed by Workers
-             and prints the total sum to the standard output
-
-   usage under Linux:
-     gcc matrixSum.c -lpthread
-     a.out size numWorkers
-
-*/
-#ifndef _REENTRANT 
-#define _REENTRANT 
-#endif 
 #include <stdint.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <time.h>
-#include <sys/time.h>
-#define MAXSIZE 10000  /* maximum matrix size */
-#define MAXWORKERS 10   /* maximum number of workers */
+
+#define MAXSIZE 10000
+#define MAXWORKERS 10
 #define MAX_QUEUE_SIZE 10000
 
+pthread_mutex_t barrier;
+pthread_cond_t go;
+int numWorkers;
+int numArrived = 0;
 
-pthread_mutex_t barrier;  /* mutex lock for the barrier */
-pthread_cond_t go;        /* condition variable for leaving */
-int numWorkers;           /* number of workers */ 
-int numArrived = 0;       /* number who have arrived */
-
-
-/* function declarations */
 void swap(int* a, int* b);
 void serialQuicksort(int start, int end, int arr[]);
 int partition(int start, int end, int arr[]);
 
-
-
-/* a reusable counter barrier */
 void Barrier() {
   pthread_mutex_lock(&barrier);
   numArrived++;
@@ -49,235 +29,202 @@ void Barrier() {
   pthread_mutex_unlock(&barrier);
 }
 
-/* timer */
-double read_timer() {
-    static bool initialized = false;
-    static struct timeval start;
-    struct timeval end;
-    if( !initialized )
-    {
-        gettimeofday( &start, NULL );
-        initialized = true;
-    }
-    gettimeofday( &end, NULL );
-    return (end.tv_sec - start.tv_sec) + 1.0e-6 * (end.tv_usec - start.tv_usec);
-}
-
-double start_time, end_time; /* start and end times */
 int size;
-int activeQueue;
-  int *parallelArr;
-  int *serialArr;
+int *parallelArr;
+int *serialArr;
 pthread_t workers[MAXWORKERS];
 volatile bool work_done = false;
+pthread_mutex_t work_done_mutex;
+pthread_cond_t work_done_cond;
 
-typedef struct{
+typedef struct {
   int left, right;
 } Task;
 
-typedef struct{ 
+typedef struct {
   Task tasks[MAX_QUEUE_SIZE];
   int front, rear, count;
   pthread_mutex_t lock;
+  pthread_cond_t not_empty;
 } TaskQueue;
 
 TaskQueue taskQueue;
 
-/* initialize queue we just created*/
+volatile int active_threads = 0; // Counter for active threads
+pthread_mutex_t active_threads_mutex; // Mutex for active_threads counter
 
-void initQueue(TaskQueue *q){
+void initQueue(TaskQueue *q) {
   q->front = 0;
   q->rear = 0;
   q->count = 0;
   pthread_mutex_init(&q->lock, NULL);
+  pthread_cond_init(&q->not_empty, NULL);
 }
 
-/* function to queue tasks*/
-void enqueue(TaskQueue *q, Task task){
+void enqueue(TaskQueue *q, Task task) {
   pthread_mutex_lock(&q->lock);
-  if(q->count < MAX_QUEUE_SIZE){
+  if (q->count < MAX_QUEUE_SIZE) {
     q->tasks[q->rear] = task;
-    q->rear = (q->rear+1) % MAX_QUEUE_SIZE;
+    q->rear = (q->rear + 1) % MAX_QUEUE_SIZE;
     q->count++;
+    pthread_cond_signal(&q->not_empty);
   }
   pthread_mutex_unlock(&q->lock);
-
 }
 
-/* function to remove from queue*/
-int dequeue(TaskQueue *q, Task *task){
+int dequeue(TaskQueue *q, Task *task) {
   pthread_mutex_lock(&q->lock);
-  if(q->count == 0) {
-    pthread_mutex_unlock (&q->lock);
+  while (q->count == 0 && !work_done) {
+    pthread_cond_wait(&q->not_empty, &q->lock);
+  }
+  if (q->count == 0) {
+    pthread_mutex_unlock(&q->lock);
     return 0;
   }
   *task = q->tasks[q->front];
-  q->front = (q->front + 1 ) % MAX_QUEUE_SIZE;
+  q->front = (q->front + 1) % MAX_QUEUE_SIZE;
   q->count--;
   pthread_mutex_unlock(&q->lock);
   return 1;
 }
 
-void *Worker(void *);
+void *Worker(void *arg) {
+  while (1) {
+    Task task;
+    if (dequeue(&taskQueue, &task)) {
+      // Increment active_threads counter
+      pthread_mutex_lock(&active_threads_mutex);
+      active_threads++;
+      pthread_mutex_unlock(&active_threads_mutex);
 
-/* read command line, initialize, and create threads */
+      int pivot = partition(task.left, task.right, parallelArr);
+      if (task.left < pivot - 1) enqueue(&taskQueue, (Task){task.left, pivot - 1});
+      if (pivot + 1 < task.right) enqueue(&taskQueue, (Task){pivot + 1, task.right});
+
+      // Decrement active_threads counter
+      pthread_mutex_lock(&active_threads_mutex);
+      active_threads--;
+      if (active_threads == 0 && taskQueue.count == 0) {
+        // Signal that all work is done
+        pthread_cond_signal(&work_done_cond);
+      }
+      pthread_mutex_unlock(&active_threads_mutex);
+    } else {
+      break;
+    }
+  }
+  return NULL;
+}
+
 int main(int argc, char *argv[]) {
-  int i;
-
-
-  int rnd_int;
+  int i, rnd_int;
   long l;
-
   pthread_attr_t attr;
   pthread_t workerid[MAXWORKERS];
 
-  /* set global thread attributes */
   pthread_attr_init(&attr);
   pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
-
-  /* initialize mutex and condition variable */
   pthread_mutex_init(&barrier, NULL);
   pthread_cond_init(&go, NULL);
+  pthread_mutex_init(&work_done_mutex, NULL);
+  pthread_cond_init(&work_done_cond, NULL);
+  pthread_mutex_init(&active_threads_mutex, NULL);
 
-  /* read command line args if any */
-    size = (argc > 1) ? atoi(argv[1]) : MAXSIZE;
-  numWorkers = (argc>2) ? atoi(argv[2]) : MAXWORKERS;
-  if(size > MAXSIZE) size = MAXSIZE;
-  if( numWorkers > MAXWORKERS) numWorkers = MAXWORKERS;
+  size = (argc > 1) ? atoi(argv[1]) : MAXSIZE;
+  numWorkers = (argc > 2) ? atoi(argv[2]) : MAXWORKERS;
+  if (size > MAXSIZE) size = MAXSIZE;
+  if (numWorkers > MAXWORKERS) numWorkers = MAXWORKERS;
 
-
-
-
-  /* initialize the array */
   parallelArr = (int *)malloc(size * sizeof(int));
   serialArr = (int *)malloc(size * sizeof(int));
-  if (parallelArr == NULL){
-    printf("Fel vid minnesallokering!\n");
-    return 1;
-  }
-  if (serialArr == NULL){
+  if (parallelArr == NULL || serialArr == NULL) {
     printf("Fel vid minnesallokering!\n");
     return 1;
   }
 
   srand(time(NULL));
-  for ( i = 0; i < size; i++) {
-    rnd_int = rand() % (size*10);
-
+  for (i = 0; i < size; i++) {
+    rnd_int = rand() % (size * 10);
     serialArr[i] = rnd_int;
     parallelArr[i] = rnd_int;
   }
 
-/* printing the randomized array*/
-printf("Original Unsorted Array: \n");
+  printf("Original Unsorted Array: \n");
   printf("[");
-  for(i = 0; i <size; i++){
-      if(i!= size-1){
-      printf("%d, ",serialArr[i]);
-    }else { printf("%d", serialArr[i]);
+  for (i = 0; i < size; i++) {
+    if (i != size - 1) {
+      printf("%d, ", serialArr[i]);
+    } else {
+      printf("%d", serialArr[i]);
     }
   }
-    printf("]\n");
+  printf("]\n");
 
-  double end_timeSerial, start_timeSerial;
-   start_timeSerial = clock();
-  serialQuicksort(0, size-1, serialArr);
+  // Serial Quicksort
+  clock_t start_timeSerial = clock();
+  serialQuicksort(0, size - 1, serialArr);
   double final_timeSerial = (double)(clock() - start_timeSerial) / CLOCKS_PER_SEC;
 
   initQueue(&taskQueue);
 
-
-  /* do the parallel work: create the workers */
-  start_time = clock();
-  /* create an inital task, which is to partition the whole array*/
-  for (l = 0; l < numWorkers; l++){
-    pthread_create(&workerid[l], &attr, Worker, (void *) l);
-}
-    enqueue(&taskQueue, (Task){0, size-1});
-
-  while(1){
-    if(taskQueue.count == 0){
-      work_done = true;
-      break;
-    }
+  // Parallel Quicksort
+  clock_t start_timeParallel = clock();
+  for (l = 0; l < numWorkers; l++) {
+    pthread_create(&workerid[l], &attr, Worker, (void *)l);
   }
-  
-  for( l = 0; l<numWorkers; l++){
-    pthread_join(workerid[l],NULL);
+  enqueue(&taskQueue, (Task){0, size - 1});
+
+  // Wait for all threads to finish
+  pthread_mutex_lock(&active_threads_mutex);
+  while (active_threads > 0 || taskQueue.count > 0) {
+    pthread_cond_wait(&work_done_cond, &active_threads_mutex);
   }
-  double final_timeParallel = (double)(clock() - start_time) / CLOCKS_PER_SEC;
+  pthread_mutex_unlock(&active_threads_mutex);
 
+  // Signal workers to exit
+  work_done = true;
+  pthread_cond_broadcast(&taskQueue.not_empty);
 
+  for (l = 0; l < numWorkers; l++) {
+    pthread_join(workerid[l], NULL);
+  }
+  double final_timeParallel = (double)(clock() - start_timeParallel) / CLOCKS_PER_SEC;
 
-/*final printout of the sorted arrays*/
-  printf("The Array sorter in a serial fashion time in seconds: %lf\n", final_timeSerial );
-  printf( "The array sorted in a parallel fashion, time in seconds: %lf\n", final_timeParallel);
+  printf("The Array sorted in a serial fashion, time in seconds: %lf\n", final_timeSerial);
+  printf("The array sorted in a parallel fashion, time in seconds: %lf\n", final_timeParallel);
 
-  
   free(serialArr);
   free(parallelArr);
 }
 
-/* Each worker picks up  */
-void *Worker(void *arg) {
-  while (1) {
-    Task task;
-    /* try to get a task from the queue */
-    if(dequeue(&taskQueue, &task) && (task.right-task.left) <= 100){
-      int pivot = partition(task.left, task.right, parallelArr);
-    
-        if (task.left < pivot - 1) enqueue(&taskQueue, (Task){task.left, pivot - 1});
-        if (pivot + 1 < task.right) enqueue(&taskQueue, (Task){pivot + 1, task.right});
-    } else {
-      if(work_done) break;
-      //Barrier();
-    }
-
-
-  }
-  return NULL;
-}
- 
-void serialQuicksort(int start, int end,int arr[]){
-
-  if(start < end){
-
+void serialQuicksort(int start, int end, int arr[]) {
+  if (start < end) {
     int pivot = partition(start, end, arr);
-
-    /* recursive calls, what will be parrallelized later(?)*/
-    serialQuicksort(start, pivot-1, arr);
+    serialQuicksort(start, pivot - 1, arr);
     serialQuicksort(pivot + 1, end, arr);
   }
 }
 
-/* serial partition function, low and high is indices */
-/* partitions the array i.e splits the array into lower and higher values arround the pivot*/
-int partition(int start, int end, int arr[]){
-  //lägg till median of three för optimerad metod
+int partition(int start, int end, int arr[]) {
   int mid = start + (end - start) / 2;
-  
-  /* Flytta pivot till slutet */
   int pivotIndex = mid;
   swap(&arr[pivotIndex], &arr[end]);
   int pivot = arr[end];
-
   int i = start - 1;
 
-  /* sorting the arrays */
-  for (int j = start; j < end; j++){
-    if(arr[j] < pivot){
+  for (int j = start; j < end; j++) {
+    if (arr[j] < pivot) {
       i++;
       swap(&arr[i], &arr[j]);
     }
   }
 
-  swap(&arr[i+1], &arr[end]);
-  return i+1;
+  swap(&arr[i + 1], &arr[end]);
+  return i + 1;
 }
 
-void swap(int* a, int* b ){
+void swap(int* a, int* b) {
   int t = *a;
   *a = *b;
-  *b = t ;
+  *b = t;
 }
-
